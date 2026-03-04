@@ -1,0 +1,5 @@
+{
+  "name": "Deriv Trend Master",
+  "description": "Active trend trading application for Deriv using real-time WebSocket data and technical indicators.",
+  "requestFramePermissions": []
+}
