@@ -108,6 +108,8 @@ export default function App() {
   }, [symbol]);
 
   const handleTick = useCallback((tick: Tick) => {
+    if (!tick || !tick.epoch || !tick.quote) return;
+    
     setTicks(prev => {
       const newTicks = [...prev, { time: tick.epoch, price: tick.quote }].slice(-100);
       

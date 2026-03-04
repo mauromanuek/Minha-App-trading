@@ -16,7 +16,7 @@ const DigitBot: React.FC<DigitBotProps> = ({ symbol, isAutoTrading, onTrade }) =
   
   useEffect(() => {
     const handleMessage = (data: any) => {
-      if (data.msg_type === 'tick' && data.tick.symbol === symbol) {
+      if (data.msg_type === 'tick' && data.tick && data.tick.symbol === symbol) {
         const digit = parseInt(data.tick.quote.toString().slice(-1));
         setLastDigits(prev => [...prev, digit].slice(-100));
       }

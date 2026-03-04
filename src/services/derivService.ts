@@ -24,7 +24,7 @@ class DerivService {
     this.socket.onmessage = (msg) => {
       const data = JSON.parse(msg.data);
       
-      if (data.msg_type === 'tick') {
+      if (data.msg_type === 'tick' && data.tick) {
         if (this.onTickCallback) {
           this.onTickCallback(data.tick);
         }
