@@ -25,6 +25,9 @@ import Sidebar from './components/Sidebar';
 import RiskControls from './components/RiskControls';
 import DigitBot from './components/DigitBot';
 import RiseFallBot from './components/RiseFallBot';
+import QuantProBot from './components/QuantProBot';
+import { useQuantEngine } from './services/useQuantEngine';
+import { DigitsSignal } from './services/quant/strategyDigits';
 import { cn } from './lib/utils';
 
 const SYMBOLS = [
@@ -51,6 +54,7 @@ export default function App() {
   });
   const [autoTrade, setAutoTrade] = useState(false);
   const [isAutoTradingActive, setIsAutoTradingActive] = useState(false);
+  const [isQuantAutoTrading, setIsQuantAutoTrading] = useState(false);
   const [activeTrade, setActiveTrade] = useState<Trade | null>(null);
   const [lastSignal, setLastSignal] = useState<'CALL' | 'PUT' | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -60,6 +64,16 @@ export default function App() {
   // Indicators
   const [smaShort, setSmaShort] = useState<number[]>([]);
   const [smaLong, setSmaLong] = useState<number[]>([]);
+
+  const { quantState, engine } = useQuantEngine(symbol, {
+    riskConfig: {
+      dailyStopLoss: 4,
+      dailyTakeProfit: 6,
+      maxTradesPerDay: 10,
+      riskPerTrade: 1
+    },
+    initialBalance: balance || 10000
+  });
 
   const lastTradeTime = useRef<number>(0);
 
@@ -156,7 +170,23 @@ export default function App() {
     });
   }, [isAutoTradingActive, activeTrade, checkAlerts]);
 
-  const executeTrade = (type: string, barrier?: number) => {
+  useEffect(() => {
+    if (isQuantAutoTrading && activeBot === 'QUANT_PRO' && !activeTrade && quantState.signal && quantState.signal.type !== 'NONE') {
+      const now = Date.now();
+      if (now - lastTradeTime.current < 5000) return; // 5s cooldown
+      
+      const stake = engine.getStake();
+      
+      if (quantState.signal.type === 'DIGITDIFF') {
+        const targetDigit = (quantState.signal as DigitsSignal).targetDigit;
+        executeTrade(`DIGITDIFF`, targetDigit, stake);
+      } else {
+        executeTrade(quantState.signal.type, undefined, stake);
+      }
+    }
+  }, [quantState.signal, isQuantAutoTrading, activeBot, activeTrade]);
+
+  const executeTrade = (type: string, barrier?: number, customStake?: number) => {
     // Only one trade at a time
     if (activeTrade && activeTrade.status === 'open') {
       addNotification('Trade already in progress');
@@ -168,13 +198,15 @@ export default function App() {
     
     lastTradeTime.current = now;
     
+    const stake = customStake || riskConfig.stake;
+
     const newTrade: Trade = {
       id: Math.random().toString(36).substr(2, 9),
       symbol,
       type: type as any,
       entryPrice: ticks[ticks.length - 1]?.price || 0,
       currentPrice: ticks[ticks.length - 1]?.price || 0,
-      amount: riskConfig.stake,
+      amount: stake,
       status: 'open',
       startTime: Math.floor(now / 1000),
     };
@@ -183,7 +215,7 @@ export default function App() {
     setTrades(prev => [newTrade, ...prev].slice(0, 10));
 
     if (isAuthorized) {
-      derivService.buyContract(symbol, riskConfig.stake, type, barrier);
+      derivService.buyContract(symbol, stake, type, barrier);
     }
   };
 
@@ -221,14 +253,19 @@ export default function App() {
             // Check Risk Management
             if (riskConfig.takeProfit > 0 && newProfit >= riskConfig.takeProfit) {
               setIsAutoTradingActive(false);
+              setIsQuantAutoTrading(false);
               addNotification('Take Profit Reached! Stopping bot.');
             }
             if (riskConfig.stopLoss > 0 && newProfit <= -riskConfig.stopLoss) {
               setIsAutoTradingActive(false);
+              setIsQuantAutoTrading(false);
               addNotification('Stop Loss Reached! Stopping bot.');
             }
             return newProfit;
           });
+
+          // Register trade with Quant Engine
+          engine.registerTradeResult({ isWin: profit > 0, profit });
 
           setActiveTrade(null); // Clear active trade
           setTrades(prev => prev.map(t => 
@@ -290,6 +327,9 @@ export default function App() {
     setAlerts(prev => prev.filter(a => a.id !== id));
   };
 
+  const wins = trades.filter(t => t.status === 'won').length;
+  const losses = trades.filter(t => t.status === 'lost').length;
+
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-emerald-500/30 flex">
       {/* Sidebar */}
@@ -347,6 +387,16 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-6">
+              <div className="hidden md:flex items-center gap-4 mr-4">
+                <div className="flex flex-col items-end">
+                  <span className="text-[10px] text-gray-500 font-mono uppercase">Wins</span>
+                  <span className="font-mono text-lg font-bold text-emerald-500">{wins}</span>
+                </div>
+                <div className="flex flex-col items-end">
+                  <span className="text-[10px] text-gray-500 font-mono uppercase">Losses</span>
+                  <span className="font-mono text-lg font-bold text-rose-500">{losses}</span>
+                </div>
+              </div>
               <div className="flex flex-col items-end">
                 <span className="text-[10px] text-gray-500 font-mono uppercase">Session Profit</span>
                 <div className="flex items-center gap-2">
@@ -423,6 +473,15 @@ export default function App() {
             </div>
 
             {/* Bot Specific View */}
+            {activeBot === 'QUANT_PRO' && (
+              <QuantProBot 
+                symbol={symbol}
+                isAutoTrading={isQuantAutoTrading}
+                onToggleAutoTrade={() => setIsQuantAutoTrading(!isQuantAutoTrading)}
+                quantState={quantState}
+              />
+            )}
+
             {activeBot === 'TREND' && (
               <>
                 <TradingChart 
@@ -490,53 +549,64 @@ export default function App() {
               </div>
 
               <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/5">
-                  <div>
-                    <h4 className="text-sm font-bold">Auto-Trading Mode</h4>
-                    <p className="text-[10px] text-gray-500">Enable strategy engine</p>
-                  </div>
-                  <button 
-                    onClick={() => {
-                      setAutoTrade(!autoTrade);
-                      if (autoTrade) stopTrading();
-                    }}
-                    className={cn(
-                      "w-12 h-6 rounded-full transition-all relative",
-                      autoTrade ? "bg-emerald-500" : "bg-white/10"
-                    )}
-                  >
-                    <div className={cn(
-                      "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
-                      autoTrade ? "left-7" : "left-1"
-                    )} />
-                  </button>
-                </div>
+                {activeBot !== 'QUANT_PRO' && (
+                  <>
+                    <div className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/5">
+                      <div>
+                        <h4 className="text-sm font-bold">Auto-Trading Mode</h4>
+                        <p className="text-[10px] text-gray-500">Enable strategy engine</p>
+                      </div>
+                      <button 
+                        onClick={() => {
+                          setAutoTrade(!autoTrade);
+                          if (autoTrade) stopTrading();
+                        }}
+                        className={cn(
+                          "w-12 h-6 rounded-full transition-all relative",
+                          autoTrade ? "bg-emerald-500" : "bg-white/10"
+                        )}
+                      >
+                        <div className={cn(
+                          "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                          autoTrade ? "left-7" : "left-1"
+                        )} />
+                      </button>
+                    </div>
 
-                {autoTrade && (
-                  <button
-                    onClick={() => {
-                      if (isAutoTradingActive) stopTrading();
-                      else setIsAutoTradingActive(true);
-                    }}
-                    className={cn(
-                      "w-full py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-lg",
-                      isAutoTradingActive 
-                        ? "bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/20" 
-                        : "bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20"
+                    {autoTrade && (
+                      <button
+                        onClick={() => {
+                          if (isAutoTradingActive) stopTrading();
+                          else setIsAutoTradingActive(true);
+                        }}
+                        className={cn(
+                          "w-full py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-lg",
+                          isAutoTradingActive 
+                            ? "bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/20" 
+                            : "bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20"
+                        )}
+                      >
+                        {isAutoTradingActive ? (
+                          <>
+                            <Activity className="w-4 h-4 animate-pulse" />
+                            STOP TRADING & CLOSE
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="w-4 h-4" />
+                            START AUTO-TRADING
+                          </>
+                        )}
+                      </button>
                     )}
-                  >
-                    {isAutoTradingActive ? (
-                      <>
-                        <Activity className="w-4 h-4 animate-pulse" />
-                        STOP TRADING & CLOSE
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="w-4 h-4" />
-                        START AUTO-TRADING
-                      </>
-                    )}
-                  </button>
+                  </>
+                )}
+                
+                {activeBot === 'QUANT_PRO' && (
+                  <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
+                    <h4 className="text-sm font-bold text-indigo-400 mb-2">Controle do Quant Pro</h4>
+                    <p className="text-xs text-slate-400 mb-4">O robô quantitativo possui sua própria gestão de risco e execução. Use o botão no painel principal para ativá-lo.</p>
+                  </div>
                 )}
               </div>
 

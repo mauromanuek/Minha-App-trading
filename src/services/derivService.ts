@@ -63,6 +63,23 @@ class DerivService {
     });
   }
 
+  subscribeCandles(symbol: string, granularity: number) {
+    this.send({
+      ticks_history: symbol,
+      adjust_start_time: 1,
+      count: 200, // Get enough history for EMA 200
+      end: 'latest',
+      start: 1,
+      style: 'candles',
+      granularity: granularity,
+      subscribe: 1
+    });
+  }
+
+  unsubscribeCandles() {
+    this.send({ forget_all: 'candles' });
+  }
+
   subscribeTicks(symbol: string) {
     this.send({
       ticks: symbol,

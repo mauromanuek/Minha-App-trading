@@ -21,6 +21,7 @@ interface SidebarProps {
 
 const Sidebar: React.FC<SidebarProps> = ({ activeBot, onBotChange, isOpen, onToggle }) => {
   const bots = [
+    { id: 'QUANT_PRO', name: 'Quant Pro', icon: ShieldAlert, desc: 'Institutional AI Engine' },
     { id: 'TREND', name: 'Trend Master', icon: LayoutDashboard, desc: 'SMA Crossover Strategy' },
     { id: 'DIGIT', name: 'Digit Analyzer', icon: Binary, desc: 'Fast Digit Statistics' },
     { id: 'RISE_FALL', name: 'Rise/Fall Scalper', icon: Zap, desc: 'Quick Tick Scalping' },

@@ -9,7 +9,7 @@ export interface HistoryPoint {
   price: number;
 }
 
-export type BotType = 'TREND' | 'DIGIT' | 'RISE_FALL';
+export type BotType = 'TREND' | 'DIGIT' | 'RISE_FALL' | 'QUANT_PRO';
 
 export interface RiskConfig {
   stopLoss: number;
